@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6](https://github.com/bearcove/fontcull/compare/fontcull-cli-v1.0.5...fontcull-cli-v1.0.6) - 2025-12-03
+
+### Other
+
+- Add README files for both crates ([#11](https://github.com/bearcove/fontcull/pull/11))
+
 ## [1.0.5](https://github.com/bearcove/fontcull/releases/tag/fontcull-cli-v1.0.5) - 2025-12-03
 
 ### Other
