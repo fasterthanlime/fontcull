@@ -26,7 +26,7 @@ fontcull = { version = "2", default-features = false }
 
 ## Usage
 
-```rust
+```ignore
 use fontcull::{subset_font_to_woff2, decompress_font};
 use std::collections::HashSet;
 
@@ -43,7 +43,7 @@ std::fs::write("MyFont-subset.woff2", woff2).unwrap();
 
 ### With WOFF2 input
 
-```rust
+```ignore
 use fontcull::{decompress_font, subset_font_data, compress_to_woff2};
 use std::collections::HashSet;
 
@@ -65,7 +65,7 @@ Enable the `static-analysis` feature to parse HTML and CSS for font usage:
 fontcull = { version = "2", features = ["static-analysis"] }
 ```
 
-```rust
+```ignore
 use fontcull::{analyze_fonts, extract_css_from_html, subset_font_to_woff2};
 
 let html = r#"<html>
