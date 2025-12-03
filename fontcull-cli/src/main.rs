@@ -3,39 +3,39 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use chromiumoxide::{Page, browser::Browser};
-use clap::Parser;
 use color_eyre::eyre::{Context, Result};
+use facet::Facet;
+use facet_args as args;
 use futures::StreamExt;
 
 mod glyph_script;
 mod klippa_backend;
 
-#[derive(Parser, Debug)]
-#[command(name = "fontcull")]
-#[command(about = "Subset fonts based on actual glyph usage from web pages")]
+/// Subset fonts based on actual glyph usage from web pages
+#[derive(Facet, Debug)]
 struct Args {
     /// URLs to scan for glyph usage
-    #[arg(required = true)]
+    #[facet(args::positional)]
     urls: Vec<String>,
 
     /// Font files to subset (glob patterns supported)
-    #[arg(long, short = 's')]
+    #[facet(default, args::named, args::short = 's')]
     subset: Vec<String>,
 
     /// Only include glyphs used by these font families (comma-separated)
-    #[arg(long, short = 'f')]
+    #[facet(default, args::named, args::short = 'f')]
     family: Option<String>,
 
     /// Maximum number of pages to spider (0 = no limit)
-    #[arg(long, default_value = "0")]
+    #[facet(default = 0, args::named)]
     spider_limit: usize,
 
     /// Additional characters to always include (whitelist)
-    #[arg(long, short = 'w')]
+    #[facet(default, args::named, args::short = 'w')]
     whitelist: Option<String>,
 
     /// Output directory for subset fonts
-    #[arg(long, short = 'o')]
+    #[facet(default, args::named, args::short = 'o')]
     output: Option<PathBuf>,
 }
 
@@ -251,7 +251,19 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let args = Args::parse();
+    // Handle --help before parsing
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    if raw_args.iter().any(|a| a == "--help" || a == "-h") {
+        let help = args::help::generate_help::<Args>(&args::help::HelpConfig {
+            program_name: Some("fontcull".to_string()),
+            version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            ..Default::default()
+        });
+        println!("{help}");
+        return Ok(());
+    }
+
+    let args: Args = args::from_std_args()?;
     tracing::info!(?args, "Starting fontcull");
 
     // Launch browser
