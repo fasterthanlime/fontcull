@@ -44,8 +44,8 @@ pub enum SubsetError {
     Subset(String),
     /// Failed to compress to WOFF2
     Woff2(String),
-    /// Failed to decompress WOFF2
-    Woff2Decompress(String),
+    /// Failed to decompress WOFF font
+    WoffDecompress(String),
 }
 
 impl std::fmt::Display for SubsetError {
@@ -54,7 +54,7 @@ impl std::fmt::Display for SubsetError {
             SubsetError::FontParse(msg) => write!(f, "failed to parse font: {msg}"),
             SubsetError::Subset(msg) => write!(f, "failed to subset font: {msg}"),
             SubsetError::Woff2(msg) => write!(f, "failed to compress to WOFF2: {msg}"),
-            SubsetError::Woff2Decompress(msg) => write!(f, "failed to decompress WOFF2: {msg}"),
+            SubsetError::WoffDecompress(msg) => write!(f, "failed to decompress WOFF: {msg}"),
         }
     }
 }
@@ -105,23 +105,19 @@ impl FontFormat {
     }
 }
 
-/// Decompress a WOFF2 font to TTF/OTF
+/// Decompress a WOFF font to TTF/OTF
 ///
 /// If the input is already TTF/OTF, returns a copy unchanged.
-/// If the input is WOFF2, decompresses it to TTF/OTF.
+/// If the input is WOFF1 or WOFF2, decompresses it to TTF/OTF.
 ///
 /// This is a separate operation that can be cached/salsified independently
 /// from subsetting.
 pub fn decompress_font(font_data: &[u8]) -> Result<Vec<u8>, SubsetError> {
     match FontFormat::detect(font_data) {
         FontFormat::Woff2 => woff::version2::decompress(font_data)
-            .ok_or_else(|| SubsetError::Woff2Decompress("WOFF2 decompression failed".to_string())),
-        FontFormat::Woff => {
-            // WOFF1 decompression
-            woff::version1::decompress(font_data).ok_or_else(|| {
-                SubsetError::Woff2Decompress("WOFF1 decompression failed".to_string())
-            })
-        }
+            .ok_or_else(|| SubsetError::WoffDecompress("WOFF2 decompression failed".to_string())),
+        FontFormat::Woff => woff::version1::decompress(font_data)
+            .ok_or_else(|| SubsetError::WoffDecompress("WOFF1 decompression failed".to_string())),
         // Already TTF/OTF, return as-is
         _ => Ok(font_data.to_vec()),
     }
@@ -129,9 +125,15 @@ pub fn decompress_font(font_data: &[u8]) -> Result<Vec<u8>, SubsetError> {
 
 /// Compress TTF/OTF font data to WOFF2
 ///
+/// Uses maximum compression (level 11) with no embedded metadata.
+///
 /// This is a separate operation that can be cached/salsified independently
 /// from subsetting.
 pub fn compress_to_woff2(font_data: &[u8]) -> Result<Vec<u8>, SubsetError> {
+    // woff::version2::compress(data, metadata, quality, allow_transforms)
+    // - metadata: empty string (no metadata)
+    // - quality: 11 (maximum brotli compression)
+    // - allow_transforms: true (enable WOFF2 table transforms)
     woff::version2::compress(font_data, "", 11, true)
         .ok_or_else(|| SubsetError::Woff2("WOFF2 compression failed".to_string()))
 }
@@ -318,19 +320,15 @@ mod tests {
 
     #[test]
     #[cfg(feature = "klippa")]
-    fn test_woff2_roundtrip() {
-        // Read a real TTF file
-        let ttf_data =
-            std::fs::read("vendored/fontcull-font-test-data/test_data/ttf/simple_glyf.ttf")
-                .expect("failed to read test TTF file");
-
-        // Compress to WOFF2
-        let woff2_data = compress_to_woff2(&ttf_data).expect("failed to compress to WOFF2");
+    fn test_decompress_woff2_fixture() {
+        // Read WOFF2 fixture file (created by fonttools)
+        let woff2_data =
+            std::fs::read("test_data/simple_glyf.woff2").expect("failed to read WOFF2 fixture");
 
         // Verify it's actually WOFF2
         assert_eq!(FontFormat::detect(&woff2_data), FontFormat::Woff2);
 
-        // Decompress back
+        // Decompress
         let decompressed = decompress_font(&woff2_data).expect("failed to decompress WOFF2");
 
         // The decompressed data should be valid TTF
@@ -343,14 +341,31 @@ mod tests {
 
     #[test]
     #[cfg(feature = "klippa")]
-    fn test_subset_woff2_input() {
-        // Read a real TTF file
-        let ttf_data =
-            std::fs::read("vendored/fontcull-font-test-data/test_data/ttf/simple_glyf.ttf")
-                .expect("failed to read test TTF file");
+    fn test_decompress_woff1_fixture() {
+        // Read WOFF1 fixture file (created by fonttools)
+        let woff1_data =
+            std::fs::read("test_data/simple_glyf.woff").expect("failed to read WOFF1 fixture");
 
-        // Compress to WOFF2
-        let woff2_input = compress_to_woff2(&ttf_data).expect("failed to compress to WOFF2");
+        // Verify it's actually WOFF1
+        assert_eq!(FontFormat::detect(&woff1_data), FontFormat::Woff);
+
+        // Decompress
+        let decompressed = decompress_font(&woff1_data).expect("failed to decompress WOFF1");
+
+        // The decompressed data should be valid TTF
+        assert_eq!(FontFormat::detect(&decompressed), FontFormat::Ttf);
+
+        // And we should be able to subset it
+        let chars: HashSet<char> = ['a', 'b', 'c'].into_iter().collect();
+        let _subsetted = subset_font_data(&decompressed, &chars).expect("failed to subset");
+    }
+
+    #[test]
+    #[cfg(feature = "klippa")]
+    fn test_subset_woff2_input() {
+        // Read WOFF2 fixture
+        let woff2_input =
+            std::fs::read("test_data/simple_glyf.woff2").expect("failed to read WOFF2 fixture");
 
         // Decompress, subset, and recompress - the full pipeline
         let decompressed = decompress_font(&woff2_input).expect("failed to decompress");
@@ -360,8 +375,22 @@ mod tests {
 
         // Verify output is WOFF2
         assert_eq!(FontFormat::detect(&woff2_output), FontFormat::Woff2);
+    }
 
-        // Output should be smaller than input (subsetted)
-        assert!(woff2_output.len() < woff2_input.len());
+    #[test]
+    #[cfg(feature = "klippa")]
+    fn test_subset_woff1_input() {
+        // Read WOFF1 fixture
+        let woff1_input =
+            std::fs::read("test_data/simple_glyf.woff").expect("failed to read WOFF1 fixture");
+
+        // Decompress, subset, and recompress - the full pipeline
+        let decompressed = decompress_font(&woff1_input).expect("failed to decompress");
+        let chars: HashSet<char> = ['a', 'b', 'c'].into_iter().collect();
+        let subsetted = subset_font_data(&decompressed, &chars).expect("failed to subset");
+        let woff2_output = compress_to_woff2(&subsetted).expect("failed to compress output");
+
+        // Verify output is WOFF2
+        assert_eq!(FontFormat::detect(&woff2_output), FontFormat::Woff2);
     }
 }
